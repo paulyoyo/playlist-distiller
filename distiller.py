@@ -8,8 +8,10 @@ Usage:
 The script will prompt you to select which external disk to search.
 """
 
+import re
 import sys
 import argparse
+from datetime import date
 from pathlib import Path
 
 from providers import (detect_provider, fetch_spotify_tracks, fetch_tidal_tracks,
@@ -85,15 +87,16 @@ def main():
     print(f"\nFetching playlist from {provider.capitalize()}...")
 
     if provider == "spotify":
-        tracks = fetch_spotify_tracks(args.url)
+        playlist_name, tracks = fetch_spotify_tracks(args.url)
     else:
-        tracks = fetch_tidal_tracks(args.url)
+        playlist_name, tracks = fetch_tidal_tracks(args.url)
 
     if not tracks:
         print("No tracks found in playlist.")
         sys.exit(1)
 
-    print(f"Found {len(tracks)} tracks in playlist.\n")
+    print(f"Playlist: {playlist_name}")
+    print(f"Found {len(tracks)} tracks.\n")
 
     # Show first few tracks as preview
     print("Preview:")
@@ -137,11 +140,16 @@ def main():
         print("\nNo matches found. No .m3u file created.")
         sys.exit(0)
 
-    output_name = args.output or f"playlist_{provider}.m3u"
-    if not output_name.endswith(".m3u"):
-        output_name += ".m3u"
+    if args.output:
+        output_name = args.output
+        if not output_name.endswith(".m3u"):
+            output_name += ".m3u"
+    else:
+        safe_name = re.sub(r'[^\w\s-]', '', playlist_name).strip().replace(' ', '_')
+        today = date.today().strftime("%Y-%m-%d")
+        output_name = f"{safe_name}_{today}.m3u"
 
-    count = write_m3u(results, output_name, f"{provider} playlist")
+    count = write_m3u(results, output_name, playlist_name)
     print(f"\nPlaylist saved: {output_name} ({count} tracks)")
     print("Import this file into Traktor via: File > Import Collection/Playlist")
 
@@ -149,10 +157,10 @@ def main():
     if not args.no_missing and missing:
         print(f"\nCreating missing tracks playlist on {provider.capitalize()}...")
         if provider == "spotify":
-            url = create_missing_spotify_playlist(missing, output_name.replace(".m3u", ""))
+            url = create_missing_spotify_playlist(missing, playlist_name)
             print(f"Spotify playlist created: {url}")
         else:
-            pid = create_missing_tidal_playlist(missing, output_name.replace(".m3u", ""))
+            pid = create_missing_tidal_playlist(missing, playlist_name)
             print(f"Tidal playlist created: https://listen.tidal.com/playlist/{pid}")
     elif not args.no_missing and not missing:
         print("\nAll tracks matched - no missing playlist needed.")

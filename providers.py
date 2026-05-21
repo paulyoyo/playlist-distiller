@@ -52,10 +52,14 @@ def _get_spotify_client_credentials():
     ))
 
 
-def fetch_spotify_tracks(url: str) -> list[dict]:
-    """Fetch tracks from a Spotify playlist. Returns list of {artist, title, uri}."""
+def fetch_spotify_tracks(url: str) -> tuple[str, list[dict]]:
+    """Fetch tracks from a Spotify playlist. Returns (playlist_name, tracks)."""
     sp = _get_spotify_client_credentials()
     playlist_id = extract_spotify_playlist_id(url)
+
+    playlist_info = sp.playlist(playlist_id, fields="name")
+    playlist_name = playlist_info["name"]
+
     tracks = []
     offset = 0
 
@@ -74,11 +78,11 @@ def fetch_spotify_tracks(url: str) -> list[dict]:
             break
         offset += 100
 
-    return tracks
+    return playlist_name, tracks
 
 
-def fetch_tidal_tracks(url: str) -> list[dict]:
-    """Fetch tracks from a Tidal playlist. Returns list of {artist, title}."""
+def fetch_tidal_tracks(url: str) -> tuple[str, list[dict]]:
+    """Fetch tracks from a Tidal playlist. Returns (playlist_name, tracks)."""
     import tidalapi
 
     session = tidalapi.Session()
@@ -118,6 +122,7 @@ def fetch_tidal_tracks(url: str) -> list[dict]:
 
     playlist_id = extract_tidal_playlist_id(url)
     playlist = session.playlist(playlist_id)
+    playlist_name = playlist.name
     tidal_tracks = playlist.tracks()
 
     tracks = []
@@ -126,7 +131,7 @@ def fetch_tidal_tracks(url: str) -> list[dict]:
         title = t.name
         tracks.append({"artist": artist, "title": title, "tidal_id": t.id})
 
-    return tracks
+    return playlist_name, tracks
 
 
 def _get_tidal_session():
