@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.playlist_distiller_config.json
+.env
+*.egg-info/
+dist/
+build/
