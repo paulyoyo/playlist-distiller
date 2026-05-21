@@ -82,6 +82,8 @@ def main():
                         help="Output .m3u filename (default: auto from playlist)")
     parser.add_argument("--no-missing", action="store_true",
                         help="Skip creating a playlist with unmatched tracks")
+    parser.add_argument("--auto", action="store_true",
+                        help="Auto-select best match without interactive prompts")
 
     args = parser.parse_args()
 
@@ -117,7 +119,8 @@ def main():
         print("No audio files found on selected disk.")
         sys.exit(1)
 
-    results = match_tracks(tracks, audio_files, threshold=args.threshold)
+    results = match_tracks(tracks, audio_files, threshold=args.threshold,
+                           interactive=not args.auto)
 
     # 4. Report results
     matched = [r for r in results if r["match_path"]]
