@@ -12,7 +12,8 @@ import sys
 import argparse
 from pathlib import Path
 
-from providers import detect_provider, fetch_spotify_tracks, fetch_tidal_tracks
+from providers import (detect_provider, fetch_spotify_tracks, fetch_tidal_tracks,
+                       create_missing_spotify_playlist, create_missing_tidal_playlist)
 from matcher import scan_audio_files, match_tracks
 from config import DEFAULT_FUZZY_THRESHOLD
 
@@ -74,6 +75,8 @@ def main():
                         help=f"Fuzzy match threshold 0-100 (default: {DEFAULT_FUZZY_THRESHOLD})")
     parser.add_argument("--output", "-o", type=str, default=None,
                         help="Output .m3u filename (default: auto from playlist)")
+    parser.add_argument("--no-missing", action="store_true",
+                        help="Skip creating a playlist with unmatched tracks")
 
     args = parser.parse_args()
 
@@ -141,6 +144,18 @@ def main():
     count = write_m3u(results, output_name, f"{provider} playlist")
     print(f"\nPlaylist saved: {output_name} ({count} tracks)")
     print("Import this file into Traktor via: File > Import Collection/Playlist")
+
+    # 6. Create missing tracks playlist on the same provider (default behavior)
+    if not args.no_missing and missing:
+        print(f"\nCreating missing tracks playlist on {provider.capitalize()}...")
+        if provider == "spotify":
+            url = create_missing_spotify_playlist(missing, output_name.replace(".m3u", ""))
+            print(f"Spotify playlist created: {url}")
+        else:
+            pid = create_missing_tidal_playlist(missing, output_name.replace(".m3u", ""))
+            print(f"Tidal playlist created: https://listen.tidal.com/playlist/{pid}")
+    elif not args.no_missing and not missing:
+        print("\nAll tracks matched - no missing playlist needed.")
 
 
 if __name__ == "__main__":

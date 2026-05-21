@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 .playlist_distiller_config.json
+.spotify_token_cache
 .env
 *.egg-info/
 dist/

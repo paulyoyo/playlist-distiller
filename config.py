@@ -5,6 +5,7 @@ from pathlib import Path
 CONFIG_FILE = Path(__file__).parent / ".playlist_distiller_config.json"
 
 AUDIO_EXTENSIONS = {".mp3", ".flac", ".wav", ".aiff", ".aif", ".m4a", ".ogg"}
+SPOTIFY_TOKEN_CACHE = CONFIG_FILE.parent / ".spotify_token_cache"
 
 # Fuzzy match threshold (0-100). 100 = exact match. Lower = more lenient.
 DEFAULT_FUZZY_THRESHOLD = 70
@@ -40,3 +41,25 @@ def get_spotify_credentials():
         print("Credentials saved to config.\n")
 
     return client_id, client_secret
+
+
+SPOTIFY_REDIRECT_URI = "http://localhost:8888/callback"
+SPOTIFY_SCOPES = "playlist-modify-public playlist-modify-private"
+
+
+def get_spotify_user_auth():
+    """Get Spotify client with user authorization (needed for creating playlists)."""
+    import spotipy
+    from spotipy.oauth2 import SpotifyOAuth
+
+    client_id, client_secret = get_spotify_credentials()
+    cache_path = CONFIG_FILE.parent / ".spotify_token_cache"
+
+    sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
+        client_id=client_id,
+        client_secret=client_secret,
+        redirect_uri=SPOTIFY_REDIRECT_URI,
+        scope=SPOTIFY_SCOPES,
+        cache_path=str(cache_path),
+    ))
+    return sp
