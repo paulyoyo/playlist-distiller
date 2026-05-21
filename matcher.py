@@ -82,12 +82,18 @@ def match_tracks(tracks: list[dict], audio_files: list[Path],
         if matched:
             found += 1
 
-        results.append({
+        result = {
             "artist": artist,
             "title": title,
             "match_path": str(best_file) if matched else None,
             "score": best_score if matched else 0,
-        })
+        }
+        # Preserve provider IDs for missing playlist creation
+        if "uri" in track:
+            result["uri"] = track["uri"]
+        if "tidal_id" in track:
+            result["tidal_id"] = track["tidal_id"]
+        results.append(result)
 
         # Progress indicator
         print(f"\r  Matching: {i}/{total} ({found} found)", end="", flush=True)

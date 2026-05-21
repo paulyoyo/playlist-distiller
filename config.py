@@ -43,7 +43,7 @@ def get_spotify_credentials():
     return client_id, client_secret
 
 
-SPOTIFY_REDIRECT_URI = "http://localhost:8888/callback"
+SPOTIFY_REDIRECT_URI = "https://www.djpaul.pe/callback"
 SPOTIFY_SCOPES = "playlist-modify-public playlist-modify-private"
 
 
