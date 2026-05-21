@@ -146,6 +146,10 @@ def main():
         print("\nNo matches found. No .m3u file created.")
         sys.exit(0)
 
+    # Ensure playlists/ directory exists
+    playlists_dir = Path(__file__).parent / "playlists"
+    playlists_dir.mkdir(exist_ok=True)
+
     if args.output:
         output_name = args.output
         if not output_name.endswith(".m3u"):
@@ -155,8 +159,9 @@ def main():
         today = date.today().strftime("%Y-%m-%d")
         output_name = f"{safe_name}_{today}_{provider}.m3u"
 
-    count = write_m3u(results, output_name, playlist_name)
-    print(f"\nPlaylist saved: {output_name} ({count} tracks)")
+    output_path = str(playlists_dir / output_name)
+    count = write_m3u(results, output_path, playlist_name)
+    print(f"\nPlaylist saved: {output_path} ({count} tracks)")
     print("Import this file into Traktor via: File > Import Collection/Playlist")
 
     # 6. Create missing tracks playlist on the same provider (default behavior)
