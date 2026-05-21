@@ -43,7 +43,7 @@ def get_spotify_credentials():
     return client_id, client_secret
 
 
-SPOTIFY_REDIRECT_URI = "https://www.djpaul.pe/callback"
+SPOTIFY_REDIRECT_URI = "http://127.0.0.1:8080/callback"
 SPOTIFY_SCOPES = "playlist-modify-public playlist-modify-private"
 
 
@@ -56,11 +56,8 @@ def get_spotify_user_auth():
     cache_path = CONFIG_FILE.parent / ".spotify_token_cache"
 
     print("\n--- Spotify Authorization ---")
-    print("1. A browser will open for you to log in to Spotify")
-    print("2. After approving, you'll be redirected to a page that may show an error")
-    print("3. Copy the FULL URL from your browser's address bar")
-    print(f"   (it will start with {SPOTIFY_REDIRECT_URI}?code=...)")
-    print("4. Paste that URL here\n")
+    print("A browser will open for you to log in to Spotify.")
+    print("After approving, the browser will redirect back automatically.\n")
 
     sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
         client_id=client_id,
