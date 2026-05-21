@@ -10,7 +10,10 @@ The script will prompt you to select which external disk to search.
 
 import re
 import sys
+import warnings
 import argparse
+
+warnings.filterwarnings("ignore", message="urllib3 v2 only supports OpenSSL")
 from datetime import date
 from pathlib import Path
 

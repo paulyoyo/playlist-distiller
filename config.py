@@ -55,11 +55,19 @@ def get_spotify_user_auth():
     client_id, client_secret = get_spotify_credentials()
     cache_path = CONFIG_FILE.parent / ".spotify_token_cache"
 
+    print("\n--- Spotify Authorization ---")
+    print("1. A browser will open for you to log in to Spotify")
+    print("2. After approving, you'll be redirected to a page that may show an error")
+    print("3. Copy the FULL URL from your browser's address bar")
+    print(f"   (it will start with {SPOTIFY_REDIRECT_URI}?code=...)")
+    print("4. Paste that URL here\n")
+
     sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
         client_id=client_id,
         client_secret=client_secret,
         redirect_uri=SPOTIFY_REDIRECT_URI,
         scope=SPOTIFY_SCOPES,
         cache_path=str(cache_path),
+        open_browser=True,
     ))
     return sp
