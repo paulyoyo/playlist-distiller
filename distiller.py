@@ -150,7 +150,7 @@ def main():
     else:
         safe_name = re.sub(r'[^\w\s-]', '', playlist_name).strip().replace(' ', '_')
         today = date.today().strftime("%Y-%m-%d")
-        output_name = f"{safe_name}_{today}.m3u"
+        output_name = f"{safe_name}_{today}_{provider}.m3u"
 
     count = write_m3u(results, output_name, playlist_name)
     print(f"\nPlaylist saved: {output_name} ({count} tracks)")
