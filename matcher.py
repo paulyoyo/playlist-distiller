@@ -49,12 +49,12 @@ def scan_audio_files(disk_path: str) -> list[Path]:
         raise FileNotFoundError(f"Path not found: {disk_path}")
 
     audio_files = []
-    print(f"Scanning {disk_path} for audio files...")
+    print(f"{_LILAC}Scanning {disk_path} for audio files...{_RESET}")
     for f in root.rglob("*"):
         if f.suffix.lower() in AUDIO_EXTENSIONS and f.is_file():
             audio_files.append(f)
 
-    print(f"Found {len(audio_files)} audio files.")
+    print(f"{_WISTERIA}Found {len(audio_files)} audio files.{_RESET}")
     return audio_files
 
 
@@ -141,21 +141,27 @@ def _pick_candidate(track_label: str, candidates: list[tuple[Path, int]],
     disk_root: volume path to strip from display.
     Returns selected (file_path, score) or None to skip.
     """
-    # Limit to 10 options (0-9) for single keypress
+    # Limit to 10 options, numbered 1-9,0 matching keyboard layout
     candidates = candidates[:10]
     n = len(candidates)
+    # Display labels: 1,2,...,9,0 — maps to candidate indices 0,1,...,8,9
+    labels = [str((i + 1) % 10) for i in range(n)]
 
     print(f"\n  Multiple matches for: {track_label}")
     for i, (fp, sc) in enumerate(candidates):
         rel = str(fp.parent)
         if disk_root and rel.startswith(disk_root):
             rel = rel[len(disk_root):].lstrip("/")
-        print(f"    {_GOLDEN}{i}. {fp.name}{_RESET}")
+        print(f"    {_GOLDEN}{labels[i]}. {fp.name}{_RESET}")
         if rel:
             print(f"       {_DIM}{rel}{_RESET}")
 
+    # Build key-to-index map: '1'->0, '2'->1, ..., '9'->8, '0'->9
+    key_map = {labels[i]: i for i in range(n)}
+
     preview_proc = None
-    print(f"    {_DIM}0-{n - 1} select, p+N preview, s skip, u undo, q quit & save{_RESET}")
+    hint = ",".join(labels)
+    print(f"    {_DIM}{hint} select, p+N preview, s skip, u undo, q quit & save{_RESET}")
 
     def _read_key():
         fd = sys.stdin.fileno()
@@ -192,23 +198,20 @@ def _pick_candidate(track_label: str, candidates: list[tuple[Path, int]],
         if ch == "p":
             try:
                 digit = _read_key()
-                idx = int(digit)
-                if 0 <= idx < n:
+                if digit in key_map:
+                    idx = key_map[digit]
                     _kill_preview(preview_proc)
                     print(f"  previewing: {_WISTERIA}{candidates[idx][0].name}{_RESET}")
                     preview_proc = _preview_file(str(candidates[idx][0]))
-            except (ValueError, EOFError, KeyboardInterrupt):
+            except (EOFError, KeyboardInterrupt):
                 pass
             continue
 
-        try:
-            idx = int(ch)
-            if 0 <= idx < n:
-                _kill_preview(preview_proc)
-                print(f"  -> {_GOLDEN}{candidates[idx][0].name}{_RESET}")
-                return candidates[idx]
-        except ValueError:
-            pass
+        if ch in key_map:
+            idx = key_map[ch]
+            _kill_preview(preview_proc)
+            print(f"  -> {_GOLDEN}{candidates[idx][0].name}{_RESET}")
+            return candidates[idx]
 
 
 def match_tracks(tracks: list[dict], audio_files: list[Path],

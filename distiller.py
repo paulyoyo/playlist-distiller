@@ -19,43 +19,64 @@ from pathlib import Path
 
 from providers import (detect_provider, fetch_spotify_tracks, fetch_tidal_tracks,
                        create_missing_spotify_playlist, create_missing_tidal_playlist)
-from matcher import scan_audio_files, match_tracks
+from matcher import scan_audio_files, match_tracks, _GOLDEN, _WISTERIA, _LILAC, _DIM, _RESET
 from config import DEFAULT_FUZZY_THRESHOLD
 
 
-def list_external_disks() -> list[Path]:
-    """List mounted volumes (macOS) excluding system ones."""
+def list_disks() -> list[Path]:
+    """List all mounted volumes (macOS) excluding system internals."""
     volumes = Path("/Volumes")
-    system_volumes = {"Macintosh HD", "Macintosh HD - Data", "Recovery"}
+    skip = {"Macintosh HD - Data", "Recovery"}
     disks = []
     for v in sorted(volumes.iterdir()):
-        if v.name not in system_volumes and v.is_dir():
+        if v.name not in skip and v.is_dir():
             disks.append(v)
     return disks
 
 
 def select_disk() -> str:
-    """Prompt user to select an external disk."""
-    disks = list_external_disks()
+    """Prompt user to select a disk with single-keypress input."""
+    import termios, tty
+    disks = list_disks()
     if not disks:
-        print("No external disks found in /Volumes/")
+        print(f"{_LILAC}No disks found in /Volumes/{_RESET}")
         sys.exit(1)
 
-    print("\nAvailable disks:")
-    for i, d in enumerate(disks, 1):
-        print(f"  {i}. {d.name}")
+    # Cap at 10 (1-9, 0)
+    disks = disks[:10]
+    n = len(disks)
+    labels = [str((i + 1) % 10) for i in range(n)]
+    key_map = {labels[i]: i for i in range(n)}
+
+    print(f"\n{_LILAC}Available disks:{_RESET}")
+    for i, d in enumerate(disks):
+        print(f"  {_GOLDEN}{labels[i]}. {d.name}{_RESET}")
+
+    hint = ",".join(labels)
+    print(f"  {_DIM}{hint} select{_RESET}")
+
+    def _read_key():
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        try:
+            tty.setraw(fd)
+            return sys.stdin.read(1)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
     while True:
         try:
-            choice = input(f"\nSelect disk (1-{len(disks)}): ").strip()
-            idx = int(choice) - 1
-            if 0 <= idx < len(disks):
-                selected = disks[idx]
-                print(f"Selected: {selected}")
-                return str(selected)
-        except (ValueError, IndexError):
-            pass
-        print("Invalid selection, try again.")
+            ch = _read_key()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            sys.exit(1)
+        if ch in ("\x03", "\x04"):
+            print()
+            sys.exit(1)
+        if ch in key_map:
+            selected = disks[key_map[ch]]
+            print(f"  -> {_GOLDEN}{selected.name}{_RESET}")
+            return str(selected)
 
 
 def write_m3u(results: list[dict], output_path: str, playlist_name: str):
@@ -89,7 +110,7 @@ def main():
 
     # 1. Detect provider and fetch tracks
     provider = detect_provider(args.url)
-    print(f"\nFetching playlist from {provider.capitalize()}...")
+    print(f"\n{_LILAC}Fetching playlist from {provider.capitalize()}...{_RESET}")
 
     if provider == "spotify":
         playlist_name, tracks = fetch_spotify_tracks(args.url)
@@ -97,18 +118,18 @@ def main():
         playlist_name, tracks = fetch_tidal_tracks(args.url)
 
     if not tracks:
-        print("No tracks found in playlist.")
+        print(f"{_LILAC}No tracks found in playlist.{_RESET}")
         sys.exit(1)
 
-    print(f"Playlist: {playlist_name}")
-    print(f"Found {len(tracks)} tracks.\n")
+    print(f"{_GOLDEN}{playlist_name}{_RESET}")
+    print(f"{_WISTERIA}{len(tracks)} tracks{_RESET}\n")
 
     # Show first few tracks as preview
-    print("Preview:")
+    print(f"{_LILAC}Preview:{_RESET}")
     for t in tracks[:5]:
-        print(f"  {t['artist']} - {t['title']}")
+        print(f"  {_WISTERIA}{t['artist']}{_RESET} - {_GOLDEN}{t['title']}{_RESET}")
     if len(tracks) > 5:
-        print(f"  ... and {len(tracks) - 5} more\n")
+        print(f"  {_DIM}... and {len(tracks) - 5} more{_RESET}\n")
 
     # 2. Select disk to search
     disk_path = select_disk()
@@ -116,7 +137,7 @@ def main():
     # 3. Scan and match
     audio_files = scan_audio_files(disk_path)
     if not audio_files:
-        print("No audio files found on selected disk.")
+        print(f"{_LILAC}No audio files found on selected disk.{_RESET}")
         sys.exit(1)
 
     results = match_tracks(tracks, audio_files, threshold=args.threshold,
@@ -127,27 +148,27 @@ def main():
     matched = [r for r in results if r["match_path"]]
     missing = [r for r in results if not r["match_path"]]
 
-    print(f"\n{'='*60}")
-    print(f"RESULTS: {len(matched)}/{len(results)} tracks matched")
-    print(f"{'='*60}")
+    print(f"\n{_LILAC}{'='*60}{_RESET}")
+    print(f"{_GOLDEN}RESULTS: {len(matched)}/{len(results)} tracks matched{_RESET}")
+    print(f"{_LILAC}{'='*60}{_RESET}")
 
     if matched:
-        print("\nMatched:")
+        print(f"\n{_LILAC}Matched:{_RESET}")
         for r in matched:
             path = r['match_path']
             if path.startswith(disk_path):
                 path = path[len(disk_path):].lstrip("/")
-            print(f"  {r['artist']} - {r['title']}")
-            print(f"    -> {path}")
+            print(f"  {_WISTERIA}{r['artist']}{_RESET} - {_GOLDEN}{r['title']}{_RESET}")
+            print(f"    {_DIM}-> {path}{_RESET}")
 
     if missing:
-        print(f"\nMissing ({len(missing)}):")
+        print(f"\n{_LILAC}Missing ({len(missing)}):{_RESET}")
         for r in missing:
-            print(f"  x {r['artist']} - {r['title']}")
+            print(f"  {_DIM}x {r['artist']} - {r['title']}{_RESET}")
 
     # 5. Write .m3u
     if not matched:
-        print("\nNo matches found. No .m3u file created.")
+        print(f"\n{_LILAC}No matches found. No .m3u file created.{_RESET}")
         sys.exit(0)
 
     # Ensure playlists/ directory exists
@@ -165,20 +186,20 @@ def main():
 
     output_path = str(playlists_dir / output_name)
     count = write_m3u(results, output_path, playlist_name)
-    print(f"\nPlaylist saved: {output_path} ({count} tracks)")
-    print("Import this file into Traktor via: File > Import Collection/Playlist")
+    print(f"\n{_GOLDEN}Playlist saved:{_RESET} {_DIM}{output_path}{_RESET} {_WISTERIA}({count} tracks){_RESET}")
+    print(f"{_DIM}Import this file into Traktor via: File > Import Collection/Playlist{_RESET}")
 
     # 6. Create missing tracks playlist on the same provider (default behavior)
     if not args.no_missing and missing:
-        print(f"\nCreating missing tracks playlist on {provider.capitalize()}...")
+        print(f"\n{_LILAC}Creating missing tracks playlist on {provider.capitalize()}...{_RESET}")
         if provider == "spotify":
             url = create_missing_spotify_playlist(missing, playlist_name)
-            print(f"Spotify playlist created: {url}")
+            print(f"{_GOLDEN}Spotify playlist created:{_RESET} {_WISTERIA}{url}{_RESET}")
         else:
             pid = create_missing_tidal_playlist(missing, playlist_name)
-            print(f"Tidal playlist created: https://listen.tidal.com/playlist/{pid}")
+            print(f"{_GOLDEN}Tidal playlist created:{_RESET} {_WISTERIA}https://listen.tidal.com/playlist/{pid}{_RESET}")
     elif not args.no_missing and not missing:
-        print("\nAll tracks matched - no missing playlist needed.")
+        print(f"\n{_GOLDEN}All tracks matched — no missing playlist needed.{_RESET}")
 
 
 if __name__ == "__main__":
