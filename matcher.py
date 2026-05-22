@@ -71,16 +71,22 @@ def _kill_preview(proc):
             proc.kill()
 
 
-def _pick_candidate(track_label: str, candidates: list[tuple[Path, int]]) -> tuple[Path, int] | None:
+def _pick_candidate(track_label: str, candidates: list[tuple[Path, int]],
+                    disk_root: str = "") -> tuple[Path, int] | None:
     """Interactive picker when multiple files match a track.
 
     candidates: list of (file_path, score), sorted by score descending.
+    disk_root: volume path to strip from display.
     Returns selected (file_path, score) or None to skip.
     """
     print(f"\n  Multiple matches for: {track_label}")
     for i, (fp, sc) in enumerate(candidates, 1):
-        print(f"    {i}. [{sc}%] {fp.name}")
-        print(f"       {fp.parent}")
+        rel = str(fp.parent)
+        if disk_root and rel.startswith(disk_root):
+            rel = rel[len(disk_root):].lstrip("/")
+        print(f"    {i}. {fp.name}")
+        if rel:
+            print(f"       {rel}")
 
     preview_proc = None
     while True:
@@ -122,7 +128,8 @@ def _pick_candidate(track_label: str, candidates: list[tuple[Path, int]]) -> tup
 
 def match_tracks(tracks: list[dict], audio_files: list[Path],
                  threshold: int = DEFAULT_FUZZY_THRESHOLD,
-                 interactive: bool = True) -> list[dict]:
+                 interactive: bool = True,
+                 disk_path: str = "") -> list[dict]:
     """Match playlist tracks to local files using fuzzy matching.
 
     When interactive=True and multiple files match above threshold,
@@ -160,7 +167,11 @@ def match_tracks(tracks: list[dict], audio_files: list[Path],
             score_title = fuzz.token_set_ratio(title_only, norm_name)
             score = max(score_full, int(score_title * 0.85))
 
-            if score >= threshold and score_title >= title_min:
+            # Accept if: full match is good AND title matches,
+            # OR title alone matches well (catches DJ edits with
+            # different artist credits, misspelled tags, etc.)
+            if (score >= threshold and score_title >= title_min) \
+                    or score_title >= threshold:
                 candidates.append((file_path, score))
 
         # Sort by score descending
@@ -205,7 +216,7 @@ def match_tracks(tracks: list[dict], audio_files: list[Path],
         print(f"{'='*60}")
 
         for idx, label, candidates in picks_needed:
-            picked = _pick_candidate(label, candidates)
+            picked = _pick_candidate(label, candidates, disk_root=disk_path)
             if picked:
                 results[idx]["match_path"] = str(picked[0])
                 results[idx]["score"] = picked[1]
