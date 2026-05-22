@@ -150,13 +150,17 @@ def match_tracks(tracks: list[dict], audio_files: list[Path],
         title_only = normalize(title)
 
         candidates = []
+        # Minimum title similarity to avoid matching different songs
+        # by the same artist (e.g. "Ryan Castro - AMIGA" when looking
+        # for "Ryan Castro - LA VILLA")
+        title_min = max(50, threshold - 10)
 
         for file_path, norm_name in file_index:
             score_full = fuzz.token_set_ratio(search_str, norm_name)
             score_title = fuzz.token_set_ratio(title_only, norm_name)
             score = max(score_full, int(score_title * 0.85))
 
-            if score >= threshold:
+            if score >= threshold and score_title >= title_min:
                 candidates.append((file_path, score))
 
         # Sort by score descending
