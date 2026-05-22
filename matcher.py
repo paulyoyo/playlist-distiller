@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import re
 import subprocess
+import sys
+import termios
+import tty
 from pathlib import Path
 from thefuzz import fuzz
 from config import AUDIO_EXTENSIONS, DEFAULT_FUZZY_THRESHOLD
@@ -88,42 +91,67 @@ def _pick_candidate(track_label: str, candidates: list[tuple[Path, int]],
         if rel:
             print(f"       \033[2m{rel}\033[0m")
 
+    n = len(candidates)
     preview_proc = None
+    print(f"    \033[2m1-{n} select, p+N preview, s skip\033[0m")
+
     while True:
         try:
-            choice = input(f"    Select (1-{len(candidates)}), p<N> to preview, s to skip: ").strip().lower()
+            fd = sys.stdin.fileno()
+            old = termios.tcgetattr(fd)
+            try:
+                tty.setraw(fd)
+                ch = sys.stdin.read(1)
+            finally:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old)
         except (EOFError, KeyboardInterrupt):
             _kill_preview(preview_proc)
+            print()
             return None
 
-        if choice == "s":
+        if ch in ("\x03", "\x04"):  # Ctrl-C, Ctrl-D
             _kill_preview(preview_proc)
+            print()
             return None
 
-        # Preview: p1, p2, etc.
-        if choice.startswith("p"):
+        if ch == "s":
+            _kill_preview(preview_proc)
+            print("  skip")
+            return None
+
+        # Preview: p then digit
+        if ch == "p":
+            try:
+                fd = sys.stdin.fileno()
+                old = termios.tcgetattr(fd)
+                try:
+                    tty.setraw(fd)
+                    digit = sys.stdin.read(1)
+                finally:
+                    termios.tcsetattr(fd, termios.TCSADRAIN, old)
+            except (EOFError, KeyboardInterrupt):
+                _kill_preview(preview_proc)
+                print()
+                return None
             _kill_preview(preview_proc)
             try:
-                idx = int(choice[1:]) - 1
-                if 0 <= idx < len(candidates):
-                    print(f"    Previewing: {candidates[idx][0].name}")
+                idx = int(digit) - 1
+                if 0 <= idx < n:
+                    print(f"  previewing: {candidates[idx][0].name}")
                     preview_proc = _preview_file(str(candidates[idx][0]))
-                else:
-                    print(f"    Invalid option. Use p1-p{len(candidates)}")
             except ValueError:
-                print(f"    Invalid. Use p1-p{len(candidates)}")
+                pass
             continue
 
-        # Direct selection: 1, 2, etc.
+        # Direct selection: digit
         try:
-            idx = int(choice) - 1
-            if 0 <= idx < len(candidates):
+            idx = int(ch) - 1
+            if 0 <= idx < n:
                 _kill_preview(preview_proc)
+                print(f"  -> {candidates[idx][0].name}")
                 return candidates[idx]
         except ValueError:
             pass
-
-        print(f"    Invalid. Enter 1-{len(candidates)}, p<N>, or s")
 
 
 def match_tracks(tracks: list[dict], audio_files: list[Path],
@@ -155,6 +183,9 @@ def match_tracks(tracks: list[dict], audio_files: list[Path],
         title = track["title"]
         search_str = normalize(f"{artist} {title}")
         title_only = normalize(title)
+        # Core title: strip parenthetical/bracket content (version, remix, edit info)
+        # e.g. "La Plena (W Sound 05)" -> "La Plena"
+        core_title = normalize(re.sub(r"\(.*?\)|\[.*?\]", "", title))
 
         candidates = []
         # Minimum title similarity to avoid matching different songs
@@ -165,13 +196,17 @@ def match_tracks(tracks: list[dict], audio_files: list[Path],
         for file_path, norm_name in file_index:
             score_full = fuzz.token_set_ratio(search_str, norm_name)
             score_title = fuzz.token_set_ratio(title_only, norm_name)
-            score = max(score_full, int(score_title * 0.85))
+            # Also check core title (without version/remix info) to catch
+            # edits credited to different artists
+            score_core = fuzz.token_set_ratio(core_title, norm_name) if core_title != title_only else 0
+            best_title = max(score_title, score_core)
+            score = max(score_full, int(best_title * 0.85))
 
             # Accept if: full match is good AND title matches,
             # OR title alone matches well (catches DJ edits with
             # different artist credits, misspelled tags, etc.)
-            if (score >= threshold and score_title >= title_min) \
-                    or score_title >= threshold:
+            if (score >= threshold and best_title >= title_min) \
+                    or best_title >= threshold:
                 candidates.append((file_path, score))
 
         # Sort by score descending
