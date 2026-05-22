@@ -1,6 +1,8 @@
 """Fuzzy matching of playlist tracks to local audio files."""
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import subprocess
 import sys
@@ -8,7 +10,16 @@ import termios
 import tty
 from pathlib import Path
 from thefuzz import fuzz
-from config import AUDIO_EXTENSIONS, DEFAULT_FUZZY_THRESHOLD
+from config import AUDIO_EXTENSIONS, DEFAULT_FUZZY_THRESHOLD, MIN_DURATION_SECONDS
+
+PICKS_CACHE_DIR = Path(__file__).parent / ".pick_cache"
+
+# Salvaje palette — truecolor ANSI escapes
+_GOLDEN = "\033[38;2;234;216;47m"   # Golden Glow #EAD82F
+_WISTERIA = "\033[38;2;197;153;226m"  # Wisteria #C599E2
+_LILAC = "\033[38;2;137;86;186m"    # Deep Lilac #8956BA
+_DIM = "\033[2m"
+_RESET = "\033[0m"
 
 # Max candidates to show when asking user to pick
 
@@ -72,6 +83,56 @@ def _kill_preview(proc):
             proc.kill()
 
 
+def _get_duration(file_path: Path) -> float | None:
+    """Get audio duration in seconds via afinfo (macOS)."""
+    try:
+        out = subprocess.run(
+            ["afinfo", str(file_path)],
+            capture_output=True, text=True, timeout=5,
+        )
+        for line in out.stdout.splitlines():
+            if "estimated duration:" in line.lower():
+                return float(line.split(":")[-1].strip().split()[0])
+    except (subprocess.TimeoutExpired, ValueError, OSError):
+        pass
+    return None
+
+
+def _filter_short_files(candidates: list[tuple[Path, int]],
+                        min_seconds: float) -> list[tuple[Path, int]]:
+    """Remove candidates shorter than min_seconds."""
+    kept = []
+    for fp, score in candidates:
+        dur = _get_duration(fp)
+        if dur is None or dur >= min_seconds:
+            kept.append((fp, score))
+    return kept
+
+
+def _picks_cache_path(playlist_name: str) -> Path:
+    """Return cache file path for a playlist's pick session."""
+    key = hashlib.md5(playlist_name.encode()).hexdigest()[:12]
+    return PICKS_CACHE_DIR / f"{key}.json"
+
+
+def _load_picks_cache(playlist_name: str) -> dict:
+    """Load saved picks: {track_label: {"path": str|null, "score": int}}."""
+    path = _picks_cache_path(playlist_name)
+    if path.exists():
+        try:
+            return json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
+
+
+def _save_picks_cache(playlist_name: str, cache: dict):
+    """Persist picks cache to disk."""
+    PICKS_CACHE_DIR.mkdir(exist_ok=True)
+    path = _picks_cache_path(playlist_name)
+    path.write_text(json.dumps(cache, indent=2))
+
+
 def _pick_candidate(track_label: str, candidates: list[tuple[Path, int]],
                     disk_root: str = "") -> tuple[Path, int] | None:
     """Interactive picker when multiple files match a track.
@@ -89,12 +150,12 @@ def _pick_candidate(track_label: str, candidates: list[tuple[Path, int]],
         rel = str(fp.parent)
         if disk_root and rel.startswith(disk_root):
             rel = rel[len(disk_root):].lstrip("/")
-        print(f"    {i}. \033[1;36m{fp.name}\033[0m")
+        print(f"    {_GOLDEN}{i}. {fp.name}{_RESET}")
         if rel:
-            print(f"       \033[2m{rel}\033[0m")
+            print(f"       {_DIM}{rel}{_RESET}")
 
     preview_proc = None
-    print(f"    \033[2m0-{n - 1} select, p+N preview, s skip\033[0m")
+    print(f"    {_DIM}0-{n - 1} select, p+N preview, s skip, u undo, q quit & save{_RESET}")
 
     def _read_key():
         fd = sys.stdin.fileno()
@@ -113,15 +174,20 @@ def _pick_candidate(track_label: str, candidates: list[tuple[Path, int]],
             print()
             return None
 
-        if ch in ("\x03", "\x04"):
+        if ch in ("\x03", "\x04", "q"):
             _kill_preview(preview_proc)
-            print()
-            return None
+            print("  quit")
+            return "QUIT"
 
         if ch == "s":
             _kill_preview(preview_proc)
             print("  skip")
             return None
+
+        if ch == "u":
+            _kill_preview(preview_proc)
+            print("  undo")
+            return "UNDO"
 
         if ch == "p":
             try:
@@ -129,7 +195,7 @@ def _pick_candidate(track_label: str, candidates: list[tuple[Path, int]],
                 idx = int(digit)
                 if 0 <= idx < n:
                     _kill_preview(preview_proc)
-                    print(f"  previewing: \033[1;36m{candidates[idx][0].name}\033[0m")
+                    print(f"  previewing: {_WISTERIA}{candidates[idx][0].name}{_RESET}")
                     preview_proc = _preview_file(str(candidates[idx][0]))
             except (ValueError, EOFError, KeyboardInterrupt):
                 pass
@@ -139,7 +205,7 @@ def _pick_candidate(track_label: str, candidates: list[tuple[Path, int]],
             idx = int(ch)
             if 0 <= idx < n:
                 _kill_preview(preview_proc)
-                print(f"  -> \033[1;36m{candidates[idx][0].name}\033[0m")
+                print(f"  -> {_GOLDEN}{candidates[idx][0].name}{_RESET}")
                 return candidates[idx]
         except ValueError:
             pass
@@ -148,7 +214,8 @@ def _pick_candidate(track_label: str, candidates: list[tuple[Path, int]],
 def match_tracks(tracks: list[dict], audio_files: list[Path],
                  threshold: int = DEFAULT_FUZZY_THRESHOLD,
                  interactive: bool = True,
-                 disk_path: str = "") -> list[dict]:
+                 disk_path: str = "",
+                 playlist_name: str = "") -> list[dict]:
     """Match playlist tracks to local files using fuzzy matching.
 
     When interactive=True and multiple files match above threshold,
@@ -203,6 +270,10 @@ def match_tracks(tracks: list[dict], audio_files: list[Path],
         # Sort by score descending
         candidates.sort(key=lambda x: x[1], reverse=True)
 
+        # Filter out short files (sound effects, jingles)
+        if candidates:
+            candidates = _filter_short_files(candidates, MIN_DURATION_SECONDS)
+
         result = {
             "artist": artist,
             "title": title,
@@ -236,18 +307,77 @@ def match_tracks(tracks: list[dict], audio_files: list[Path],
 
     # Phase 2: interactive resolution
     if picks_needed:
-        print(f"\n{'='*60}")
-        print(f"  {len(picks_needed)} tracks have multiple close matches — please pick:")
-        print(f"  (Use p<N> to Quick Look preview, then select a number)")
-        print(f"{'='*60}")
+        picks_cache = _load_picks_cache(playlist_name) if playlist_name else {}
+        # Restore previously saved picks
+        restored = 0
+        unresolved = []
+        for idx, label, candidates in picks_needed:
+            if label in picks_cache:
+                saved = picks_cache[label]
+                if saved["path"]:
+                    # Verify the saved file still exists
+                    if Path(saved["path"]).exists():
+                        results[idx]["match_path"] = saved["path"]
+                        results[idx]["score"] = saved["score"]
+                        found += 1
+                        restored += 1
+                        continue
+                    else:
+                        del picks_cache[label]
+                else:
+                    # Previously skipped
+                    restored += 1
+                    continue
+            unresolved.append((idx, label, candidates))
 
-        for pick_num, (idx, label, candidates) in enumerate(picks_needed, 1):
-            print(f"\n  [{pick_num}/{len(picks_needed)}]", end="")
-            picked = _pick_candidate(label, candidates, disk_root=disk_path)
-            if picked:
-                results[idx]["match_path"] = str(picked[0])
-                results[idx]["score"] = picked[1]
-                found += 1
+        if restored:
+            print(f"\n  Restored {restored} saved picks from previous session.")
+
+        if unresolved:
+            print(f"\n{'='*60}")
+            print(f"  {len(unresolved)} tracks have multiple close matches — please pick:")
+            print(f"  (Use p<N> to Quick Look preview, then select a number)")
+            print(f"{'='*60}")
+
+            pick_pos = 0
+            while pick_pos < len(unresolved):
+                idx, label, candidates = unresolved[pick_pos]
+                print(f"\n  [{pick_pos + 1}/{len(unresolved)}]", end="")
+                picked = _pick_candidate(label, candidates, disk_root=disk_path)
+                if picked == "QUIT":
+                    if playlist_name:
+                        _save_picks_cache(playlist_name, picks_cache)
+                        print(f"\n  Progress saved ({len(picks_cache)} picks). Resume next run.")
+                    break
+                if picked == "UNDO":
+                    if pick_pos > 0:
+                        pick_pos -= 1
+                        prev_idx, prev_label = unresolved[pick_pos][0], unresolved[pick_pos][1]
+                        if results[prev_idx]["match_path"]:
+                            found -= 1
+                        results[prev_idx]["match_path"] = None
+                        results[prev_idx]["score"] = 0
+                        picks_cache.pop(prev_label, None)
+                    else:
+                        print("  (nothing to undo)")
+                    continue
+                if picked:
+                    results[idx]["match_path"] = str(picked[0])
+                    results[idx]["score"] = picked[1]
+                    found += 1
+                    picks_cache[label] = {"path": str(picked[0]), "score": picked[1]}
+                else:
+                    picks_cache[label] = {"path": None, "score": 0}
+                if playlist_name:
+                    _save_picks_cache(playlist_name, picks_cache)
+                pick_pos += 1
+            else:
+                # Completed all picks — clean up cache
+                if playlist_name:
+                    cache_path = _picks_cache_path(playlist_name)
+                    if cache_path.exists():
+                        cache_path.unlink()
+                    print(f"\n  All picks resolved — cache cleared.")
 
         print(f"\n  Resolution complete. Total matched: {found}/{total}")
 

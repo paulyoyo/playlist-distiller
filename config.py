@@ -10,6 +10,9 @@ SPOTIFY_TOKEN_CACHE = CONFIG_FILE.parent / ".spotify_token_cache"
 # Fuzzy match threshold (0-100). 100 = exact match. Lower = more lenient.
 DEFAULT_FUZZY_THRESHOLD = 70
 
+# Minimum file duration in seconds to exclude sound effects / jingles
+MIN_DURATION_SECONDS = 30
+
 
 def load_config():
     if CONFIG_FILE.exists():

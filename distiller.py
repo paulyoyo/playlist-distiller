@@ -120,7 +120,8 @@ def main():
         sys.exit(1)
 
     results = match_tracks(tracks, audio_files, threshold=args.threshold,
-                           interactive=not args.auto, disk_path=disk_path)
+                           interactive=not args.auto, disk_path=disk_path,
+                           playlist_name=playlist_name)
 
     # 4. Report results
     matched = [r for r in results if r["match_path"]]
