@@ -133,8 +133,11 @@ def main():
     if matched:
         print("\nMatched:")
         for r in matched:
-            print(f"  [{r['score']}%] {r['artist']} - {r['title']}")
-            print(f"         -> {r['match_path']}")
+            path = r['match_path']
+            if path.startswith(disk_path):
+                path = path[len(disk_path):].lstrip("/")
+            print(f"  {r['artist']} - {r['title']}")
+            print(f"    -> {path}")
 
     if missing:
         print(f"\nMissing ({len(missing)}):")

@@ -84,9 +84,9 @@ def _pick_candidate(track_label: str, candidates: list[tuple[Path, int]],
         rel = str(fp.parent)
         if disk_root and rel.startswith(disk_root):
             rel = rel[len(disk_root):].lstrip("/")
-        print(f"    {i}. {fp.name}")
+        print(f"    {i}. \033[1;36m{fp.name}\033[0m")
         if rel:
-            print(f"       {rel}")
+            print(f"       \033[2m{rel}\033[0m")
 
     preview_proc = None
     while True:
@@ -215,7 +215,8 @@ def match_tracks(tracks: list[dict], audio_files: list[Path],
         print(f"  (Use p<N> to Quick Look preview, then select a number)")
         print(f"{'='*60}")
 
-        for idx, label, candidates in picks_needed:
+        for pick_num, (idx, label, candidates) in enumerate(picks_needed, 1):
+            print(f"\n  [{pick_num}/{len(picks_needed)}]", end="")
             picked = _pick_candidate(label, candidates, disk_root=disk_path)
             if picked:
                 results[idx]["match_path"] = str(picked[0])
