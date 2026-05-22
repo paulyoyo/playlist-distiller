@@ -11,7 +11,6 @@ from thefuzz import fuzz
 from config import AUDIO_EXTENSIONS, DEFAULT_FUZZY_THRESHOLD
 
 # Max candidates to show when asking user to pick
-MAX_CANDIDATES = 8
 
 
 def normalize(text: str) -> str:
@@ -49,16 +48,15 @@ def scan_audio_files(disk_path: str) -> list[Path]:
 
 
 def _preview_file(file_path: str):
-    """Open a file with macOS Quick Look (qlmanage) for audio preview."""
+    """Play audio file immediately using macOS afplay."""
     try:
         proc = subprocess.Popen(
-            ["qlmanage", "-p", file_path],
+            ["afplay", file_path],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
         return proc
     except FileNotFoundError:
-        print("    (qlmanage not available, trying open...)")
         subprocess.Popen(["open", file_path],
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return None
@@ -82,8 +80,12 @@ def _pick_candidate(track_label: str, candidates: list[tuple[Path, int]],
     disk_root: volume path to strip from display.
     Returns selected (file_path, score) or None to skip.
     """
+    # Limit to 10 options (0-9) for single keypress
+    candidates = candidates[:10]
+    n = len(candidates)
+
     print(f"\n  Multiple matches for: {track_label}")
-    for i, (fp, sc) in enumerate(candidates, 1):
+    for i, (fp, sc) in enumerate(candidates):
         rel = str(fp.parent)
         if disk_root and rel.startswith(disk_root):
             rel = rel[len(disk_root):].lstrip("/")
@@ -91,25 +93,27 @@ def _pick_candidate(track_label: str, candidates: list[tuple[Path, int]],
         if rel:
             print(f"       \033[2m{rel}\033[0m")
 
-    n = len(candidates)
     preview_proc = None
-    print(f"    \033[2m1-{n} select, p+N preview, s skip\033[0m")
+    print(f"    \033[2m0-{n - 1} select, p+N preview, s skip\033[0m")
+
+    def _read_key():
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        try:
+            tty.setraw(fd)
+            return sys.stdin.read(1)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
     while True:
         try:
-            fd = sys.stdin.fileno()
-            old = termios.tcgetattr(fd)
-            try:
-                tty.setraw(fd)
-                ch = sys.stdin.read(1)
-            finally:
-                termios.tcsetattr(fd, termios.TCSADRAIN, old)
+            ch = _read_key()
         except (EOFError, KeyboardInterrupt):
             _kill_preview(preview_proc)
             print()
             return None
 
-        if ch in ("\x03", "\x04"):  # Ctrl-C, Ctrl-D
+        if ch in ("\x03", "\x04"):
             _kill_preview(preview_proc)
             print()
             return None
@@ -119,36 +123,23 @@ def _pick_candidate(track_label: str, candidates: list[tuple[Path, int]],
             print("  skip")
             return None
 
-        # Preview: p then digit
         if ch == "p":
             try:
-                fd = sys.stdin.fileno()
-                old = termios.tcgetattr(fd)
-                try:
-                    tty.setraw(fd)
-                    digit = sys.stdin.read(1)
-                finally:
-                    termios.tcsetattr(fd, termios.TCSADRAIN, old)
-            except (EOFError, KeyboardInterrupt):
-                _kill_preview(preview_proc)
-                print()
-                return None
-            _kill_preview(preview_proc)
-            try:
-                idx = int(digit) - 1
+                digit = _read_key()
+                idx = int(digit)
                 if 0 <= idx < n:
-                    print(f"  previewing: {candidates[idx][0].name}")
+                    _kill_preview(preview_proc)
+                    print(f"  previewing: \033[1;36m{candidates[idx][0].name}\033[0m")
                     preview_proc = _preview_file(str(candidates[idx][0]))
-            except ValueError:
+            except (ValueError, EOFError, KeyboardInterrupt):
                 pass
             continue
 
-        # Direct selection: digit
         try:
-            idx = int(ch) - 1
+            idx = int(ch)
             if 0 <= idx < n:
                 _kill_preview(preview_proc)
-                print(f"  -> {candidates[idx][0].name}")
+                print(f"  -> \033[1;36m{candidates[idx][0].name}\033[0m")
                 return candidates[idx]
         except ValueError:
             pass
@@ -236,7 +227,7 @@ def match_tracks(tracks: list[dict], audio_files: list[Path],
             else:
                 # Queue for interactive pick
                 picks_needed.append((len(results), f"{artist} - {title}",
-                                     candidates[:MAX_CANDIDATES]))
+                                     candidates))
 
         results.append(result)
         print(f"\r  Matching: {i}/{total} ({found} found, {len(picks_needed)} need review)", end="", flush=True)
