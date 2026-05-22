@@ -1,4 +1,5 @@
 """Fuzzy matching of playlist tracks to local audio files."""
+from __future__ import annotations
 
 import re
 import subprocess
